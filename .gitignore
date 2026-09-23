@@ -1,0 +1,4 @@
+.env
+vagas_enviadas.json
+__pycache__/
+*.pyc
