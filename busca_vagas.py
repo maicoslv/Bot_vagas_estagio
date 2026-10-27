@@ -6,18 +6,12 @@ from dotenv import load_dotenv
 # Carrega as variáveis do ficheiro .env
 load_dotenv()
 
-TOKEN_BOT = os.getenv("TOKEN_BOT")
-CHAT_ID = os.getenv("CHAT_ID")
-ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID")
-ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY")
+# Credenciais lidas via variáveis de ambiente (ou fallback)
+TOKEN_BOT = os.getenv("TOKEN_BOT", "8985157843:AAFmsnwK_GF4Eq6zOFm21CKHWazoQKY3Dyg")
+CHAT_ID = os.getenv("CHAT_ID", "961991500")
 
-# --- CONFIGURAÇÕES ---
-TOKEN_BOT = "8985157843:AAFmsnwK_GF4Eq6zOFm21CKHWazoQKY3Dyg"
-CHAT_ID = "961991500"
-
-# Credenciais da Adzuna
-ADZUNA_APP_ID = "d62bf11a"
-ADZUNA_APP_KEY = "7189db76cc1beafb956db2131fea7fcb"
+ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "d62bf11a")
+ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "7189db76cc1beafb956db2131fea7fcb")
 
 # Arquivo para salvar os links das vagas que já foram enviadas
 ARQUIVO_HISTORICO = "vagas_enviadas.json"
@@ -25,8 +19,12 @@ ARQUIVO_HISTORICO = "vagas_enviadas.json"
 # Filtros Rígidos
 SALARIO_MINIMO = 2000
 TERMOS_ESTAGIO = ["estagio", "estágio", "intern", "trainee"]
-TERMOS_PROGRAMACAO = ["programacao", "programação", "desenvolvimento", "developer", "dev", "software", "c#", "python", "java", "javascript", "typescript", ".net", "backend", "frontend", "fullstack"]
-TERMOS_REMOTO = ["remoto", "home office", "teletrabalho", "remote"]
+TERMOS_PROGRAMACAO = [
+    "programacao", "programação", "desenvolvimento", "developer", "dev", 
+    "software", "c#", "python", "java", "javascript", "typescript", 
+    ".net", "backend", "frontend", "fullstack"
+]
+TERMOS_REMOTO = ["remoto", "home office", "teletrabalho", "remote", "anywhere", "worldwide"]
 
 # Regiões de interesse para a Adzuna
 ESTADOS_ALVO = ["Rio Grande do Sul", "Santa Catarina", "São Paulo"]
@@ -130,6 +128,32 @@ def buscar_vagas_jobicy():
         return []
 
 
+def buscar_vagas_remotive():
+    """Busca vagas de software na API pública da Remotive."""
+    url = "https://remotive.com/api/remote-jobs?category=software-dev&limit=20"
+    try:
+        resposta = requests.get(url)
+        dados = resposta.json()
+        
+        vagas = []
+        for item in dados.get("jobs", []):
+            candidate_req = (item.get("candidate_required_location") or "").lower()
+            # Seleciona vagas globais ou direcionadas ao Brasil / América Latina
+            if "brazil" in candidate_req or "anywhere" in candidate_req or "worldwide" in candidate_req or "latam" in candidate_req or candidate_req == "":
+                vagas.append({
+                    "titulo": item.get("title"),
+                    "empresa": item.get("company_name", "Não informada"),
+                    "local": f"Remoto ({candidate_req or 'Global'})",
+                    "salario": item.get("salary") or "Não informado no anúncio",
+                    "link": item.get("url"),
+                    "descricao": item.get("description", "")
+                })
+        return vagas
+    except Exception as e:
+        print(f"Erro na Remotive: {e}")
+        return []
+
+
 def filtrar_vagas(lista_vagas):
     """Filtra rigorosamente por Estágio + Programação + Remoto."""
     vagas_filtradas = []
@@ -153,11 +177,16 @@ def main():
     todas_vagas = []
     
     # 1. Jobicy (Vagas remotas)
+    print("Buscando na Jobicy...")
     todas_vagas.extend(buscar_vagas_jobicy())
     
-    # 2. Adzuna - Remoto + Programação por Estado Alvo
+    # 2. Remotive (Vagas remotas globais/Brasil)
+    print("Buscando na Remotive...")
+    todas_vagas.extend(buscar_vagas_remotive())
+    
+    # 3. Adzuna - Remoto + Programação por Estado Alvo
     for estado in ESTADOS_ALVO:
-        print(f"Buscando vagas em: {estado}...")
+        print(f"Buscando vagas em: {estado} (Adzuna)...")
         todas_vagas.extend(buscar_vagas_adzuna("estagio desenvolvimento remoto", localizacao=estado))
         todas_vagas.extend(buscar_vagas_adzuna("estagio python remoto", localizacao=estado))
         todas_vagas.extend(buscar_vagas_adzuna("estagio c# remoto", localizacao=estado))
@@ -170,11 +199,11 @@ def main():
         print("Nenhuma nova vaga encontrada no momento.")
         return
 
-    # LIMITE DE SEGURANÇA: Envia no máximo 5 vagas por execução para evitar acúmulo no Telegram
+    # LIMITE DE SEGURANÇA: Envia no máximo 10 vagas por execução para evitar flood no Telegram
     LIMITE_VAGAS = 10
     vagas_para_enviar = novas_vagas[:LIMITE_VAGAS]
 
-    enviar_mensagem_telegram(f"🎯 **{len(vagas_para_enviar)} nova(s) vaga(s) de Estágio Remoto em Programação (R$ 2.000+)!**\n")
+    enviar_mensagem_telegram(f"🎯 **{len(vagas_para_enviar)} nova(s) vaga(s) de Estágio Remoto em Programação!**\n")
     
     for vaga in vagas_para_enviar:
         mensagem = (
