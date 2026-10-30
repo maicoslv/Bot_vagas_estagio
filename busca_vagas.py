@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 # Carrega as variáveis do ficheiro .env
 load_dotenv()
 
-# Credenciais lidas via variáveis de ambiente (ou fallback)
+# Credenciais lidas via variáveis de ambiente
 TOKEN_BOT = os.getenv("TOKEN_BOT", "8985157843:AAFmsnwK_GF4Eq6zOFm21CKHWazoQKY3Dyg")
 CHAT_ID = os.getenv("CHAT_ID", "961991500")
 
@@ -16,18 +16,17 @@ ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "7189db76cc1beafb956db2131fea7fcb")
 # Arquivo para salvar os links das vagas que já foram enviadas
 ARQUIVO_HISTORICO = "vagas_enviadas.json"
 
-# Filtros Rígidos
-SALARIO_MINIMO = 2000
+# Filtros Rígidos atualizados
+SALARIO_MINIMO = 1500
 TERMOS_ESTAGIO = ["estagio", "estágio", "intern", "trainee"]
-TERMOS_PROGRAMACAO = [
-    "programacao", "programação", "desenvolvimento", "developer", "dev", 
-    "software", "c#", "python", "java", "javascript", "typescript", 
-    ".net", "backend", "frontend", "fullstack"
-]
-TERMOS_REMOTO = ["remoto", "home office", "teletrabalho", "remote", "anywhere", "worldwide"]
 
-# Regiões de interesse para a Adzuna
-ESTADOS_ALVO = ["Rio Grande do Sul", "Santa Catarina", "São Paulo"]
+# Foco estrito em Python e C# + termos de desenvolvimento gerais
+TERMOS_PROGRAMACAO = [
+    "python", "c#", ".net", "django", "flask", "fastapi", "dotnet"
+]
+
+# Regiões de interesse (Santa Catarina, Porto Alegre e São Paulo)
+ESTADOS_ALVO = ["Santa Catarina", "Porto Alegre", "São Paulo"]
 
 
 def carregar_historico():
@@ -59,12 +58,12 @@ def enviar_mensagem_telegram(texto):
         print(f"Erro ao enviar mensagem no Telegram: {e}")
 
 
-def buscar_vagas_adzuna(termo_busca="estagio desenvolvimento remoto", localizacao=""):
+def buscar_vagas_adzuna(termo_busca, localizacao=""):
     """Busca vagas na API da Adzuna com salário mínimo de R$ 2.000."""
     if not ADZUNA_APP_ID or ADZUNA_APP_ID == "SEU_ADZUNA_APP_ID":
         return []
 
-    url = "https://api.adzuna.com/v1/api/jobs/br/search/1"
+    url = f"https://api.adzuna.com/v1/api/jobs/br/search/1"
     params = {
         "app_id": ADZUNA_APP_ID,
         "app_key": ADZUNA_APP_KEY,
@@ -94,7 +93,7 @@ def buscar_vagas_adzuna(termo_busca="estagio desenvolvimento remoto", localizaca
             vagas.append({
                 "titulo": item.get("title"),
                 "empresa": item.get("company", {}).get("display_name", "Não informada"),
-                "local": f"{item.get('location', {}).get('display_name', localizacao or 'Brasil')} (Remoto)",
+                "local": item.get('location', {}).get('display_name', localizacao),
                 "salario": texto_salario,
                 "link": item.get("redirect_url"),
                 "descricao": item.get("description", "")
@@ -106,8 +105,8 @@ def buscar_vagas_adzuna(termo_busca="estagio desenvolvimento remoto", localizaca
 
 
 def buscar_vagas_jobicy():
-    """Busca vagas remotas na Jobicy."""
-    url = "https://jobicy.com/api/v2/remote-jobs?count=15&geo=brazil"
+    """Busca vagas globais/Brasil na Jobicy."""
+    url = "https://jobicy.com/api/v2/remote-jobs?count=20&geo=brazil"
     try:
         resposta = requests.get(url)
         dados = resposta.json()
@@ -117,8 +116,8 @@ def buscar_vagas_jobicy():
             vagas.append({
                 "titulo": item.get("jobTitle"),
                 "empresa": item.get("companyName", "Não informada"),
-                "local": "Remoto",
-                "salario": "R$ 2.000,00+ (Remoto Internacional/Nacional)",
+                "local": "Remoto (Brasil)",
+                "salario": "R$ 2.000,00+ (Informado na vaga)",
                 "link": item.get("url"),
                 "descricao": item.get("jobGeo", "")
             })
@@ -130,7 +129,7 @@ def buscar_vagas_jobicy():
 
 def buscar_vagas_remotive():
     """Busca vagas de software na API pública da Remotive."""
-    url = "https://remotive.com/api/remote-jobs?category=software-dev&limit=20"
+    url = "https://remotive.com/api/remote-jobs?category=software-dev&limit=30"
     try:
         resposta = requests.get(url)
         dados = resposta.json()
@@ -138,7 +137,6 @@ def buscar_vagas_remotive():
         vagas = []
         for item in dados.get("jobs", []):
             candidate_req = (item.get("candidate_required_location") or "").lower()
-            # Seleciona vagas globais ou direcionadas ao Brasil / América Latina
             if "brazil" in candidate_req or "anywhere" in candidate_req or "worldwide" in candidate_req or "latam" in candidate_req or candidate_req == "":
                 vagas.append({
                     "titulo": item.get("title"),
@@ -155,67 +153,73 @@ def buscar_vagas_remotive():
 
 
 def filtrar_vagas(lista_vagas):
-    """Filtra rigorosamente por Estágio + Programação + Remoto."""
+    """Filtra por Estágio + Tecnologias + Localização."""
+    print(f"Total de vagas brutas retornadas pelas APIs: {len(lista_vagas)}")
     vagas_filtradas = []
     
     for vaga in lista_vagas:
-        texto_completo = f"{vaga['titulo']} {vaga.get('descricao', '')}".lower()
+        texto_completo = f"{vaga['titulo']} {vaga.get('descricao', '')} {vaga['local']}".lower()
         
         eh_estagio = any(termo in texto_completo for termo in TERMOS_ESTAGIO)
-        eh_programacao = any(tech in texto_completo for tech in TERMOS_PROGRAMACAO)
-        eh_remoto = "remoto" in vaga["local"].lower() or any(term in texto_completo for term in TERMOS_REMOTO)
+        eh_tecnologia = any(tech in texto_completo for tech in TERMOS_PROGRAMACAO)
         
-        if eh_estagio and eh_programacao and eh_remoto:
+        local_vaga = vaga['local'].lower()
+        atende_localizacao = any(
+            regiao.lower() in local_vaga or regiao.lower() in texto_completo 
+            for regiao in ESTADOS_ALVO
+        ) or "remoto" in local_vaga or "remote" in local_vaga or "anywhere" in local_vaga
+        
+        if eh_estagio and eh_tecnologia and atende_localizacao:
             vagas_filtradas.append(vaga)
             
+    print(f"Vagas que passaram em TODOS os filtros: {len(vagas_filtradas)}")
     return vagas_filtradas
 
 
 def main():
-    print("Iniciando busca rigorosa de vagas (Estágio Remoto em Programação >= R$ 2.000)...")
+    print("Iniciando busca (Estágio Python/C# - Florianópolis, Porto Alegre, SP e Remoto)...")
     historico = carregar_historico()
     todas_vagas = []
     
-    # 1. Jobicy (Vagas remotas)
-    print("Buscando na Jobicy...")
+    # 1. Site 1: Jobicy (Remoto)
     todas_vagas.extend(buscar_vagas_jobicy())
     
-    # 2. Remotive (Vagas remotas globais/Brasil)
-    print("Buscando na Remotive...")
+    # 2. Site 2: Remotive (Remoto)
     todas_vagas.extend(buscar_vagas_remotive())
     
-    # 3. Adzuna - Remoto + Programação por Estado Alvo
-    for estado in ESTADOS_ALVO:
-        print(f"Buscando vagas em: {estado} (Adzuna)...")
-        todas_vagas.extend(buscar_vagas_adzuna("estagio desenvolvimento remoto", localizacao=estado))
-        todas_vagas.extend(buscar_vagas_adzuna("estagio python remoto", localizacao=estado))
-        todas_vagas.extend(buscar_vagas_adzuna("estagio c# remoto", localizacao=estado))
+    # 3. Site 3: Adzuna (Presenciais e Remotas por Região Alvo)
+    for regiao in ESTADOS_ALVO:
+        todas_vagas.extend(buscar_vagas_adzuna("estagio python", localizacao=regiao))
+        todas_vagas.extend(buscar_vagas_adzuna("estagio c#", localizacao=regiao))
 
     vagas_relevantes = filtrar_vagas(todas_vagas)
     
+    # Remove duplicadas já enviadas anteriormente
     novas_vagas = [v for v in vagas_relevantes if v["link"] not in historico]
     
     if not novas_vagas:
         print("Nenhuma nova vaga encontrada no momento.")
         return
 
-    # LIMITE DE SEGURANÇA: Envia no máximo 10 vagas por execução para evitar flood no Telegram
+    # Limite para evitar spam no Telegram
     LIMITE_VAGAS = 10
     vagas_para_enviar = novas_vagas[:LIMITE_VAGAS]
 
-    enviar_mensagem_telegram(f"🎯 **{len(vagas_para_enviar)} nova(s) vaga(s) de Estágio Remoto em Programação!**\n")
+    # Envia uma única mensagem unificada com todas as novas vagas filtradas
+    mensagem_lote = f"🎯 *{len(vagas_para_enviar)} nova(s) vaga(s) de Estágio (Python/C#)*\n\n"
     
     for vaga in vagas_para_enviar:
-        mensagem = (
+        mensagem_lote += (
             f"📌 *{vaga['titulo']}*\n"
             f"🏢 *Empresa:* {vaga['empresa']}\n"
             f"📍 *Local:* {vaga['local']}\n"
             f"💰 *Bolsa/Salário:* {vaga['salario']}\n"
-            f"🔗 [Candidatar-se na Vaga]({vaga['link']})\n"
+            f"🔗 [Candidatar-se]({vaga['link']})\n\n"
+            f"-----------------------------------\n"
         )
-        enviar_mensagem_telegram(mensagem)
         historico.add(vaga["link"])
 
+    enviar_mensagem_telegram(mensagem_lote)
     salvar_historico(historico)
     print(f"Sucesso! {len(vagas_para_enviar)} vagas enviadas e histórico atualizado.")
 
